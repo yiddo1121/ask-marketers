@@ -50,17 +50,11 @@ else
   echo "  ✗ ask-hormozi retrieval failed — check Python 3 is installed"
 fi
 
-echo ""
-echo "✅ installed."
-echo ""
-echo "Try: /ask-mark what makes a good landing page"
-echo "Try: /ask-hormozi how do i price a subscription"
-echo ""
-echo "──────────────────────────────────────────────────────────────"
-echo "Optional: add this to your ~/.claude/CLAUDE.md so any agent in"
-echo "any directory routes 'ask mark' / 'ask hormozi' correctly:"
-echo "──────────────────────────────────────────────────────────────"
-cat <<'EOF'
+# offer to append CLAUDE.md routing block (so plain-English "ask mark" routes
+# correctly from any directory). idempotent — uses a marker comment.
+CLAUDE_MD="$CLAUDE_DIR/CLAUDE.md"
+MARKER="# ask-mark / ask-hormozi (channelled YouTubers)"
+ROUTING_BLOCK="$(cat <<'EOF'
 
 # ask-mark / ask-hormozi (channelled YouTubers)
 - **ask-mark** (`~/.claude/skills/ask-mark/SKILL.md`) - channels Mark Builds Brands. Trigger: `/ask-mark`. Corpus: `~/.claude/corpora/mark-builds-brands.txt` (95 videos).
@@ -68,4 +62,34 @@ cat <<'EOF'
 
 These are YouTubers, NOT contacts in your lifelog/iMessage. When you type `/ask-mark`, `/ask-hormozi`, say "ask mark", "ask hormozi", or "what would [name] say", invoke the matching Skill tool before doing anything else. Do NOT search lifelog contacts.
 EOF
+)"
+
 echo ""
+if [ -f "$CLAUDE_MD" ] && grep -qF "$MARKER" "$CLAUDE_MD"; then
+  echo "→ CLAUDE.md routing already present, skipping"
+else
+  # auto-append if non-interactive (curl|bash style); else prompt
+  if [ -t 0 ]; then
+    printf "→ Append routing block to %s? [Y/n] " "$CLAUDE_MD"
+    read -r reply
+    reply="${reply:-Y}"
+  else
+    reply="Y"
+  fi
+  case "$reply" in
+    [Yy]*)
+      printf "%s\n" "$ROUTING_BLOCK" >> "$CLAUDE_MD"
+      echo "  ✓ appended routing block to $CLAUDE_MD"
+      ;;
+    *)
+      echo "  ↷ skipped — paste this into $CLAUDE_MD manually if you want plain-English routing:"
+      printf "%s\n" "$ROUTING_BLOCK"
+      ;;
+  esac
+fi
+
+echo ""
+echo "✅ installed."
+echo ""
+echo "Try: /ask-mark what makes a good landing page"
+echo "Try: /ask-hormozi how do i price a subscription"
