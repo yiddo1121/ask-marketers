@@ -14,7 +14,7 @@ the install script. Just clone, install, ask.
 ## Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/ask-marketers.git
+git clone https://github.com/yiddo1121/ask-marketers.git
 cd ask-marketers
 ./install.sh
 ```
