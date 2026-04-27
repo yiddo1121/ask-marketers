@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""
+Retrieves the most relevant Mark Builds Brands transcript sections for a query.
+
+Usage: retrieve.py "<question>" [--top N] [--max-words N]
+
+Scores each video by query-term frequency (TF) with English stop-words removed,
+then returns the top N matches as full transcript sections (truncated around hits
+if longer than max-words). Output is grouped by video with date + YouTube URL.
+"""
+
+import argparse, os, re, sys
+from collections import Counter
+
+CORPUS = os.path.expanduser("~/.claude/corpora/mark-builds-brands.txt")
+
+STOP = set("""
+a an and are as at be been being but by do does did for from had has have he her him his how i if in into is it its
+just me my no not of on one or our ours so some such than that the their them then there these they this those to
+us was we were what when where which who whom why will with would you your yours about would say think
+mark video tell me thing things stuff really like would also lot
+""".split())
+
+def load_videos():
+    if not os.path.exists(CORPUS):
+        sys.exit(f"corpus not found at {CORPUS} - run yt-dlp pipeline first")
+    with open(CORPUS) as f:
+        text = f.read()
+    parts = re.split(r'(?m)^===== ', text)
+    videos = []
+    for p in parts:
+        if not p.strip(): continue
+        first_line, _, body = p.partition('\n')
+        title = first_line.strip().rstrip('=').strip()
+        # parse date and id
+        m = re.match(r'(\d{8})_(.+?)\s*\[([^\]]+)\]', title)
+        if m:
+            date, name, vid = m.groups()
+            pretty = name.replace('_', ' ').strip()
+            url = f"https://youtu.be/{vid}"
+            display_date = f"{date[:4]}-{date[4:6]}-{date[6:]}"
+        else:
+            pretty = title
+            url = ""
+            display_date = ""
+        videos.append({
+            'title': pretty,
+            'date': display_date,
+            'url': url,
+            'text': body.strip(),
+        })
+    return videos
+
+def tokenize(s):
+    return [w for w in re.findall(r"[a-z']+", s.lower()) if w not in STOP and len(w) > 2]
+
+def score(video, query_tokens):
+    text_tokens = tokenize(video['text'])
+    if not text_tokens: return 0
+    counts = Counter(text_tokens)
+    # log-scaled term frequency, sum across query tokens
+    s = 0
+    for q in query_tokens:
+        if counts[q]:
+            s += 1 + (counts[q] ** 0.5)
+    # title boost
+    title_tokens = tokenize(video['title'])
+    for q in query_tokens:
+        if q in title_tokens:
+            s += 5
+    return s
+
+def excerpt_around_hits(text, query_tokens, max_words=2000):
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    # find hit positions (case-insensitive)
+    hits = []
+    for i, w in enumerate(words):
+        wl = re.sub(r"[^a-z']", "", w.lower())
+        if wl in query_tokens:
+            hits.append(i)
+    if not hits:
+        return ' '.join(words[:max_words]) + ' [...truncated]'
+    # take a window around the densest hit cluster
+    center = hits[len(hits) // 2]
+    half = max_words // 2
+    start = max(0, center - half)
+    end = min(len(words), start + max_words)
+    start = max(0, end - max_words)
+    prefix = '[...] ' if start > 0 else ''
+    suffix = ' [...]' if end < len(words) else ''
+    return prefix + ' '.join(words[start:end]) + suffix
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('query', help='The question to ask Mark')
+    ap.add_argument('--top', type=int, default=3, help='Number of videos to return')
+    ap.add_argument('--max-words', type=int, default=2000, help='Max words per video excerpt')
+    ap.add_argument('--titles-only', action='store_true', help='Just list scored titles')
+    args = ap.parse_args()
+
+    videos = load_videos()
+    qtokens = tokenize(args.query)
+    if not qtokens:
+        sys.exit("query has no usable tokens after stop-word removal")
+
+    ranked = sorted(videos, key=lambda v: score(v, qtokens), reverse=True)
+    top = [v for v in ranked if score(v, qtokens) > 0][:args.top]
+
+    if not top:
+        sys.exit(f"no matches found for: {args.query}")
+
+    if args.titles_only:
+        for v in top:
+            print(f"[{v['date']}] {v['title']}  ({v['url']})  score={score(v, qtokens):.2f}")
+        return
+
+    print(f"# Mark Builds Brands — top {len(top)} matches for: {args.query}\n")
+    print(f"_(scored from {len(videos)} videos by query term frequency)_\n")
+    for v in top:
+        print(f"\n## [{v['date']}] {v['title']}")
+        print(f"{v['url']}\n")
+        print(excerpt_around_hits(v['text'], qtokens, args.max_words))
+        print()
+
+if __name__ == '__main__':
+    main()
